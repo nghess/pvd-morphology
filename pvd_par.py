@@ -12,6 +12,7 @@ class PVD:
         self.raw_data = None
         self.preprocessed_data = None
         self.mip_masks = None
+        self.mip = None
         self.skeletonized_data = None
         self.tips = None
         self.knots = None
@@ -31,6 +32,7 @@ class PVD:
         num_timepoints = self.raw_data.shape[0]
         self.preprocessed_data = [None] * num_timepoints
         self.mip_masks = [None] * num_timepoints
+        self.mip = [None] * num_timepoints
         
         with ThreadPoolExecutor() as executor:
             futures = [executor.submit(self.preprocess_timepoint, timepoint) 
@@ -53,6 +55,10 @@ class PVD:
         # Convert lists to numpy arrays
         self.preprocessed_data = np.array(self.preprocessed_data, dtype=object)
         self.mip_masks = np.array(self.mip_masks, dtype=object)
+
+        # Create MIP for processed data
+        for ii in range(num_timepoints):
+            self.mip[ii] = np.max(self.preprocessed_data[ii], axis=0)
 
     def skeletonize(self):
         if self.preprocessed_data is None:
