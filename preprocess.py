@@ -1,7 +1,5 @@
 import numpy as np
-import cv2
 from skimage import morphology
-from scipy.ndimage import binary_erosion, binary_dilation, label
 
 def normalize_img(image, dtype=np.uint8, ceiling=255):
     image = image.astype(float)
@@ -10,9 +8,18 @@ def normalize_img(image, dtype=np.uint8, ceiling=255):
     image *= ceiling
     return image.astype(dtype)
 
+def mean_of_darkest_pixels(image, percentage=25):
+    pixels = np.array(image)
+    pixels_flat = pixels.flatten()
+    num_pixels = len(pixels_flat)
+    num_darkest = int(num_pixels * (percentage / 100))
+    sorted_pixels = np.sort(pixels_flat)
+    darkest_pixels = sorted_pixels[:num_darkest]
+    return np.mean(darkest_pixels)
+
+
 def set_black(image, dtype=np.uint8):
-    window = image[:250,:250]
-    black_pt = np.mean(window)
+    black_pt = mean_of_darkest_pixels(image, percentage=50)
     thresholded_image = np.maximum(image, black_pt)
     scale_factor = 255 / (255 - black_pt)
     adjusted_image = (thresholded_image - black_pt) * scale_factor
