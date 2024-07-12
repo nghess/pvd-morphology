@@ -17,7 +17,6 @@ def mean_of_darkest_pixels(image, percentage=25):
     darkest_pixels = sorted_pixels[:num_darkest]
     return np.mean(darkest_pixels)
 
-
 def set_black(image, dtype=np.uint8):
     black_pt = mean_of_darkest_pixels(image, percentage=50)
     thresholded_image = np.maximum(image, black_pt)
@@ -30,41 +29,40 @@ def sigmoid_adjustment(image, std_mult=1.5, alpha=0.5):
     std_dev = np.std(image)
     midpoint = mean_val + std_dev * std_mult
     adjusted_image = 1 / (1 + np.exp(-alpha * (image - midpoint)))
-    return np.uint8(255 * (adjusted_image - adjusted_image.min()) / (adjusted_image.max() - adjusted_image.min()))  # Do we really want to go backto 255?
+    return np.uint8(255 * (adjusted_image - adjusted_image.min()) / (adjusted_image.max() - adjusted_image.min()))  # Do we really want to go back to 255?
 
 def mask_slice(image, mask):
     return image * mask
 
-def threshold_slice(image, threshold=0, cleaned=False, min_size=4):  # Is this being used?
+def threshold_slice(image, threshold=0, cleaned=False, min_size=4):  # Is this being used effectively?
     canvas = np.ones_like(image)
     image = np.where(image > threshold, canvas, 0)
     if cleaned:
         binary_img = image > 0
-        image = morphology.remove_small_objects(binary_img, min_size, connectivity=2)
+        image = morphology.remove_small_objects(binary_img, min_size, connectivity=4)
     return image
 
-def process_stack(input_stack, process_func, *args, **kwargs):  # Different from notebook, seems okay though
+def process_stack(input_stack, process_func, *args, **kwargs):
     return np.array([process_func(input_stack[z,:,:], *args, **kwargs) for z in range(input_stack.shape[0])])
 
-def create_mip_mask(input_stack, dilation_radius=3, erosion_radius=2):
-    mip_image = np.max(input_stack, axis=0)
-    mip_image_norm = normalize_img(mip_image, ceiling=1)
-    mip_mask = np.where(normalize_img(mip_image) >= 4, 1, 0)
+def create_mip_mask(input_stack, dilation_radius=5, erosion_radius=0):
+    norm_stack = process_stack(input_stack, normalize_img)
+    black_stack = process_stack(norm_stack, set_black)
+    mip_image = np.max(black_stack, axis=0)
+    mip_mask = np.where(normalize_img(mip_image) >= 1, 1, 0)
     mip_mask = morphology.binary_dilation(mip_mask, morphology.disk(radius=dilation_radius))
     mip_mask = morphology.binary_erosion(mip_mask, morphology.disk(radius=erosion_radius))
-    return morphology.remove_small_objects(mip_mask > 0, min_size=48, connectivity=4)
+    return morphology.remove_small_objects(mip_mask > 0, min_size=128, connectivity=8)
 
-def remove_floating_regions(thresh_stack, connectivity=26):
-    structuring_element = np.ones((3, 3, 3), dtype=bool)
-    #opened_array = binary_dilation(binary_erosion(thresh_stack, structure=structuring_element), structure=structuring_element)
-    return morphology.remove_small_objects(thresh_stack > 0, min_size=48000, connectivity=connectivity)
+def remove_floating_regions(input_stack, connectivity=26):
+    return morphology.remove_small_objects(input_stack > 0, min_size=48000, connectivity=connectivity)
 
 def preprocess_stack(input_stack):
     norm_stack = process_stack(input_stack, normalize_img)
     black_stack = process_stack(norm_stack, set_black)
-    processed_stack = process_stack(black_stack, sigmoid_adjustment, std_mult=3, alpha=1)
+    processed_stack = process_stack(black_stack, sigmoid_adjustment, std_mult=3, alpha=1) # is this necessary? set_black() may do the job
     mip_mask = create_mip_mask(input_stack)
-    masked_stack = process_stack(processed_stack, mask_slice, mask=mip_mask)
-    thresh_stack = process_stack(masked_stack, threshold_slice, threshold=64, min_size=4)
+    #masked_stack = process_stack(processed_stack, mask_slice, mask=mip_mask)
+    thresh_stack = process_stack(processed_stack, threshold_slice, threshold=32, min_size=128)
     final_stack = remove_floating_regions(thresh_stack)
-    return final_stack.astype(np.uint8), mip_mask
+    return final_stack.astype(np.uint8), 'mip_mask_placeholder'

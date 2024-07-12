@@ -57,11 +57,12 @@ def skeletonize_stack(binary_stack):
     # Ensure the input is binary
     binary_stack = binary_stack.astype(bool)
     
-    # Dilate by 1px
-    dilated = morphology.binary_dilation(binary_stack, morphology.ball(radius=2))
+    # Dilate
+    dilated = morphology.binary_dilation(binary_stack, morphology.ball(radius=3))
     
     # Apply Gaussian smoothing
-    smoothed = filters.gaussian(dilated, sigma=3)
+    sigma = 3
+    smoothed = filters.gaussian(dilated, sigma=sigma)
     
     # Threshold back to binary
     thresh = filters.threshold_otsu(smoothed)
@@ -77,17 +78,9 @@ def skeletonize_stack(binary_stack):
 
 def find_tips_and_knots(skeleton):
     skeleton_idx = find_indices(skeleton)
-    
-    # Find tips (cells with a single neighbor)
     tips = find_nodes(skeleton, skeleton_idx, condition=operator.eq, neighbor_criterion=1)
-    
-    # Find knots (cells with >= 3 neighbors)
     knots = find_nodes(skeleton, skeleton_idx, condition=operator.ge, neighbor_criterion=3)
-    
-    # Remove knots that are too close together
     knots = remove_close_coordinates(knots, tolerance=1)
-    
-    # Filter tips to make sure they aren't too near knots
     tips = filter_coordinates(tips, knots, tolerance=5)
     
     return tips, knots
@@ -97,7 +90,6 @@ def process_timepoint(timepoint, binary_data):
         print(f"Skeletonizing timepoint {timepoint}")
         skeleton = skeletonize_stack(binary_data)
         tips, knots = find_tips_and_knots(skeleton)
-        #print(f"Finished skeletonizing timepoint {timepoint}")
         return timepoint, skeleton, tips, knots
     except Exception as e:
         print(f"Error skeletonizing timepoint {timepoint}: {str(e)}")

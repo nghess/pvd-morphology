@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from skimage import io
 import tifffile as tiff
@@ -40,7 +41,7 @@ class PVD:
                     timepoint, (preprocessed, mip_mask) = future.result()
                     self.preprocessed_data[timepoint] = preprocessed
                     self.mip_masks[timepoint] = mip_mask
-                    print(f"Completed preprocessing timepoint {timepoint}")
+                    #print(f"Completed preprocessing timepoint {timepoint}")
                 except Exception as exc:
                     print(f"Preprocessing generated an exception: {exc}")
 
@@ -64,28 +65,38 @@ class PVD:
         print(f"Number of tips per timepoint: {[len(tip) if tip is not None else 0 for tip in self.tips]}")
         print(f"Number of knots per timepoint: {[len(knot) if knot is not None else 0 for knot in self.knots]}")
 
-    def save_results(self, output_dir, save_tiff=False):
+    def save_results(self, output_path, save_npy=True, save_tiff=False):
         if self.preprocessed_data is None or self.mip_masks is None:
             raise ValueError("Data not preprocessed. Call preprocess() first.")
         
+        # Check is save path exists. If not, create required directories
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
+
         for timepoint in range(len(self.preprocessed_data)):
             if self.preprocessed_data[timepoint] is not None:
                 if save_tiff:
-                    tiff.imwrite(f'{output_dir}/thresh_stack_{timepoint}.tif', self.preprocessed_data[timepoint].astype(np.uint8)*255)
-                np.save(f'{output_dir}/pvd_binary_{timepoint}.npy', self.preprocessed_data[timepoint])
+                    tiff.imwrite(f'{output_path}/thresh_stack_{timepoint}.tif', self.preprocessed_data[timepoint].astype(np.uint8)*255)
+                if save_npy:
+                    np.save(f'{output_path}/pvd_binary_{timepoint}.npy', self.preprocessed_data[timepoint])
             if self.mip_masks[timepoint] is not None:
                 if save_tiff:
-                    tiff.imwrite(f'{output_dir}/mip_mask_{timepoint}.tif', self.mip_masks[timepoint].astype(np.uint8)*255)
-                np.save(f'{output_dir}/mip_mask_{timepoint}.npy', self.mip_masks[timepoint])
+                    tiff.imwrite(f'{output_path}/mip_mask_{timepoint}.tif', self.mip_masks[timepoint].astype(np.uint8)*255)
+                if save_npy:
+                    np.save(f'{output_path}/mip_mask_{timepoint}.npy', self.mip_masks[timepoint])
 
+        # Change this to pickle. Also perhaps just save the entire PVD object?
         if self.skeletonized_data is not None:
             for timepoint in range(len(self.skeletonized_data)):
                 if self.skeletonized_data[timepoint] is not None:
-                    np.save(f'{output_dir}/pvd_skeleton_{timepoint}.npy', self.skeletonized_data[timepoint])
+                    if save_npy:
+                        np.save(f'{output_path}/pvd_skeleton_{timepoint}.npy', self.skeletonized_data[timepoint])
                 if self.tips[timepoint] is not None:
-                    np.save(f'{output_dir}/pvd_tips_{timepoint}.npy', np.array(self.tips[timepoint]))
+                    if save_npy:
+                        np.save(f'{output_path}/pvd_tips_{timepoint}.npy', np.array(self.tips[timepoint]))
                 if self.knots[timepoint] is not None:
-                    np.save(f'{output_dir}/pvd_knots_{timepoint}.npy', np.array(self.knots[timepoint]))
+                    if save_npy:
+                        np.save(f'{output_path}/pvd_knots_{timepoint}.npy', np.array(self.knots[timepoint]))
 
     def run_pipeline(self):
         print("Starting pipeline")
