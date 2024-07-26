@@ -2,7 +2,7 @@ import os
 import numpy as np
 from skimage import io
 import tifffile as tiff
-from preprocess import preprocess_stack
+from preprocess import preprocess_data
 from skeletonize import skeletonize_data
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -21,8 +21,24 @@ class PVD:
         self.raw_data = io.imread(self.tiff_stack_path)
         print(f"Loaded raw data with shape: {self.raw_data.shape}")
 
+    def crop_data(self, size=2000):
+        cropped_array = np.zeros((self.raw_data.shape[0], self.raw_data.shape[1], size, size))
+
+        def crop_slice(image, new_size=size):
+            assert new_size < image.shape[0], "New size must be smaller than original image"
+            x_extra, y_extra = image.shape[0] - new_size, image.shape[1] - new_size
+            x_1, y_1 = x_extra // 2, y_extra // 2
+            return image[x_1:x_1+new_size, y_1:y_1+new_size]
+        
+        for ii in range(self.raw_data.shape[0]):
+           cropped_array[ii,:,:,:] = np.array([crop_slice(self.raw_data[ii, z,:,:]) for z in range(self.raw_data.shape[1])])
+
+        self.raw_data = cropped_array
+        print(f"Cropped raw data to shape: {self.raw_data.shape}")
+        
+
     def preprocess_timepoint(self, timepoint):
-        result = preprocess_stack(self.raw_data[timepoint])
+        result = preprocess_data(self.raw_data[timepoint])
         return timepoint, result
 
     def preprocess(self):
@@ -54,7 +70,7 @@ class PVD:
 
         # Convert lists to numpy arrays
         self.preprocessed_data = np.array(self.preprocessed_data, dtype=object)
-        self.mip_masks = np.array(self.mip_masks, dtype=object)
+        #self.mip_masks = np.array(self.mip_masks, dtype=np.uint8)
 
         # Create MIP for processed data
         for ii in range(num_timepoints):
@@ -84,7 +100,7 @@ class PVD:
                 if save_tiff:
                     tiff.imwrite(f'{output_path}/thresh_stack_{timepoint}.tif', self.preprocessed_data[timepoint].astype(np.uint8)*255)
                 if save_npy:
-                    np.save(f'{output_path}/pvd_binary_{timepoint}.npy', self.preprocessed_data[timepoint])
+                    np.save(f'{output_path}/pvd_binary_{timepoint}.npy', self.preprocessed_data[timepoint].astype(np.uint8))
             if self.mip_masks[timepoint] is not None:
                 if save_tiff:
                     tiff.imwrite(f'{output_path}/mip_mask_{timepoint}.tif', self.mip_masks[timepoint].astype(np.uint8)*255)
@@ -107,6 +123,7 @@ class PVD:
     def run_pipeline(self):
         print("Starting pipeline")
         self.load_data()
+        self.crop_data()
         self.preprocess()
         self.skeletonize()
         print("Pipeline completed")

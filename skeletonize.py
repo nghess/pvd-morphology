@@ -1,7 +1,6 @@
 import numpy as np
 import operator
 from skimage import filters, morphology
-from scipy import ndimage
 from scipy.ndimage import label
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -65,7 +64,7 @@ def skeletonize_stack(binary_stack):
     smoothed = filters.gaussian(dilated, sigma=sigma)
     
     # Threshold back to binary
-    thresh = filters.threshold_otsu(smoothed)
+    thresh = filters.threshold_yen(smoothed)  # Yen's method
     binary = smoothed > thresh
     
     # Skeletonize
@@ -74,7 +73,7 @@ def skeletonize_stack(binary_stack):
     # Remove floating segments
     skeleton_main = remove_floating_segments(skeleton)
     
-    return skeleton_main
+    return skeleton_main.astype(np.uint8)
 
 def find_tips_and_knots(skeleton):
     skeleton_idx = find_indices(skeleton)

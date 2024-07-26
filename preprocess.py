@@ -1,5 +1,5 @@
 import numpy as np
-from skimage import morphology
+from skimage import filters, morphology
 
 def normalize_img(image, dtype=np.uint8, ceiling=255):
     image = image.astype(float)
@@ -18,7 +18,7 @@ def mean_of_darkest_pixels(image, percentage=25):
     return np.mean(darkest_pixels)
 
 def set_black(image, dtype=np.uint8):
-    black_pt = mean_of_darkest_pixels(image, percentage=50)
+    black_pt = mean_of_darkest_pixels(image, percentage=66)
     thresholded_image = np.maximum(image, black_pt)
     scale_factor = 255 / (255 - black_pt)
     adjusted_image = (thresholded_image - black_pt) * scale_factor
@@ -36,11 +36,14 @@ def mask_slice(image, mask):
 
 def threshold_slice(image, threshold=0, cleaned=False, min_size=4):  # Is this being used effectively?
     canvas = np.ones_like(image)
-    image = np.where(image > threshold, canvas, 0)
+    image = np.where(image > threshold, canvas, 0)  # Should we try a more specific method?
     if cleaned:
         binary_img = image > 0
         image = morphology.remove_small_objects(binary_img, min_size, connectivity=4)
     return image
+
+def threshold_slice_yen(image):
+    return filters.threshold_yen(image)
 
 def process_stack(input_stack, process_func, *args, **kwargs):
     return np.array([process_func(input_stack[z,:,:], *args, **kwargs) for z in range(input_stack.shape[0])])
@@ -49,20 +52,19 @@ def create_mip_mask(input_stack, dilation_radius=5, erosion_radius=0):
     norm_stack = process_stack(input_stack, normalize_img)
     black_stack = process_stack(norm_stack, set_black)
     mip_image = np.max(black_stack, axis=0)
-    mip_mask = np.where(normalize_img(mip_image) >= 1, 1, 0)
+    mip_mask = np.where(normalize_img(mip_image) >= 2, 1, 0)
     mip_mask = morphology.binary_dilation(mip_mask, morphology.disk(radius=dilation_radius))
-    mip_mask = morphology.binary_erosion(mip_mask, morphology.disk(radius=erosion_radius))
     return morphology.remove_small_objects(mip_mask > 0, min_size=128, connectivity=8)
 
 def remove_floating_regions(input_stack, connectivity=26):
     return morphology.remove_small_objects(input_stack > 0, min_size=48000, connectivity=connectivity)
 
-def preprocess_stack(input_stack):
+def preprocess_data(input_stack):
     norm_stack = process_stack(input_stack, normalize_img)
     black_stack = process_stack(norm_stack, set_black)
     processed_stack = process_stack(black_stack, sigmoid_adjustment, std_mult=3, alpha=1) # is this necessary? set_black() may do the job
-    mip_mask = create_mip_mask(input_stack)
+    #mip_mask = create_mip_mask(input_stack)
     #masked_stack = process_stack(processed_stack, mask_slice, mask=mip_mask)
     thresh_stack = process_stack(processed_stack, threshold_slice, threshold=32, min_size=128)
     final_stack = remove_floating_regions(thresh_stack)
-    return final_stack.astype(np.uint8), 'mip_mask_placeholder'
+    return final_stack.astype(np.uint8), "mip_mask_placeholder"
