@@ -1,4 +1,5 @@
 import os
+import time
 import numpy as np
 from skimage import io
 import tifffile as tiff
@@ -7,6 +8,7 @@ from skeletonize import skeletonize_data
 from segment_matching import find_outer_segments, match_segments, get_matched_segments
 from visualize import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from scipy.spatial import KDTree
 
 
 class PVD:
@@ -17,7 +19,7 @@ class PVD:
         self.file = file
         self.tiff_stack_path = f"{self.path}/{self.dataset}/{self.session}/{file}"
         self.raw_data = None
-        self.preprocessed_data = None
+        self.processed_data = None
         self.mip_masks = None
         self.mip = None
         self.skeletonized_data = None  # Get rid of this at some point. Wasteful.
@@ -27,10 +29,11 @@ class PVD:
         self.outer_segments = None
         self.matched_segments = None
         self.unmatched_segments = None
+        self.labeled_data = []
+        self.label_colors = []
 
     def load_data(self):
         self.raw_data = io.imread(self.tiff_stack_path)
-        print(f"Loaded raw data with shape: {self.raw_data.shape}")
 
     def crop_data(self, size=2000):
         cropped_array = np.zeros((self.raw_data.shape[0], self.raw_data.shape[1], size, size))
@@ -45,8 +48,6 @@ class PVD:
            cropped_array[ii,:,:,:] = np.array([crop_slice(self.raw_data[ii, z,:,:]) for z in range(self.raw_data.shape[1])])
 
         self.raw_data = cropped_array
-        print(f"Cropped raw data to shape: {self.raw_data.shape}")
-        
 
     def preprocess_timepoint(self, timepoint):
         result = preprocess_data(self.raw_data[timepoint])
@@ -57,7 +58,7 @@ class PVD:
             raise ValueError("Raw data not loaded. Call load_data() first.")
         
         num_timepoints = self.raw_data.shape[0]
-        self.preprocessed_data = [None] * num_timepoints
+        self.processed_data = [None] * num_timepoints
         self.mip_masks = [None] * num_timepoints
         self.mip = [None] * num_timepoints
         
@@ -68,35 +69,33 @@ class PVD:
             for future in as_completed(futures):
                 try:
                     timepoint, (preprocessed, mip_mask) = future.result()
-                    self.preprocessed_data[timepoint] = preprocessed
+                    self.processed_data[timepoint] = preprocessed
                     self.mip_masks[timepoint] = mip_mask
                     #print(f"Completed preprocessing timepoint {timepoint}")
                 except Exception as exc:
                     print(f"Preprocessing generated an exception: {exc}")
 
         # Check if all timepoints were preprocessed
-        missing = [i for i in range(num_timepoints) if self.preprocessed_data[i] is None or self.mip_masks[i] is None]
+        missing = [i for i in range(num_timepoints) if self.processed_data[i] is None or self.mip_masks[i] is None]
         if missing:
             print(f"Warning: Timepoints {missing} were not preprocessed successfully")
 
         # Convert lists to numpy arrays
-        self.preprocessed_data = np.array(self.preprocessed_data, dtype=object)
+        self.processed_data = np.array(self.processed_data, dtype=object)
         #self.mip_masks = np.array(self.mip_masks, dtype=np.uint8)
+
+        self.raw_data = "Raw data has been removed after preprocessing to save memory."  # Clear raw data
 
         # Create MIP for processed data
         for ii in range(num_timepoints):
-            self.mip[ii] = np.max(self.preprocessed_data[ii], axis=0)
+            self.mip[ii] = np.max(self.processed_data[ii], axis=0)
 
     def skeletonize(self):
-        if self.preprocessed_data is None:
+        if self.processed_data is None:
             raise ValueError("Data not preprocessed. Call preprocess() first.")
         
-        results = skeletonize_data(self.preprocessed_data)
+        results = skeletonize_data(self.processed_data)
         self.skeletonized_data, self.tips, self.knots, self.skeleton_idx = zip(*results)
-        
-        print(f"Skeletonized data shape: {[skeleton.shape if skeleton is not None else None for skeleton in self.skeletonized_data]}")
-        print(f"Number of tips per timepoint: {[len(tip) if tip is not None else 0 for tip in self.tips]}")
-        print(f"Number of knots per timepoint: {[len(knot) if knot is not None else 0 for knot in self.knots]}")
 
     def find_outer_segments(self):
         if self.skeletonized_data is None or self.tips is None or self.knots is None:
@@ -129,10 +128,22 @@ class PVD:
 
     def get_unmatched_voxels(self):
         self.unmatched_segments = []
-        for t in range(self.raw_data.shape[0]):
+        for t in range(self.processed_data.shape[0]):
             self.unmatched_segments.append(self.set_cells_to_zero(self.skeletonized_data[t], self.matched_segments[t]))
 
-        print(f"Grouped unmatched segments across all timepoints.")
+        core_segments = []  # This list is populated with indices of all unmatched segments
+
+        for ii in range(len(self.unmatched_segments)):
+            core_segments.append(np.where(self.unmatched_segments[ii] == 1))
+
+        for ii in range(len(self.unmatched_segments)):
+            x = list(core_segments[ii][1])
+            y = list(core_segments[ii][2])
+            z = list(core_segments[ii][0])
+
+            self.matched_segments[ii].append(list(zip(z,x,y)))  # Append core segment to end of matched segments list for given timepoint
+
+        print(f"Grouped unmatched segments across each timepoint.")
 
     def visualize_skeleton(self, output_path):
         if self.skeletonized_data is None or self.tips is None or self.knots is None:
@@ -174,32 +185,138 @@ class PVD:
             f'Matched Segments (4 timepoints): <b>{self.session}</b>'
         )
 
+    def label_segmented_volume(self):
+        if self.processed_data is None or self.matched_segments is None:
+            raise ValueError("Processed data or matched segments not available. Make sure to run the pipeline first.")
+
+        print("Starting label_segmented_volume method")
+
+        def find_indices(array):
+            return np.argwhere(array > 0)
+
+        def assign_segments_to_indices(indices, segments):
+            flattened_segments = []
+            coord_to_segment = {}
+            
+            for segment_index, segment in enumerate(segments):
+                for coord in segment:
+                    flattened_segments.append(coord)
+                    coord_to_segment[tuple(coord)] = segment_index
+            
+            tree = KDTree(flattened_segments)
+            _, nearest_indices = tree.query(indices)
+            
+            segment_assignments = [coord_to_segment[tuple(flattened_segments[i])] for i in nearest_indices]
+            return segment_assignments
+
+        def label_data_for_imagej_color(indices, segment_assignments, shape, num_segments):
+            labeled_array = np.zeros((*shape, 3), dtype=np.uint8)
+            np.random.seed(0)
+            colors = np.random.randint(0, 255, size=(num_segments, 3), dtype=np.uint8)
+            
+            labeled_array[indices[:, 0], indices[:, 1], indices[:, 2]] = colors[segment_assignments]
+            
+            return labeled_array, colors
+
+        def process_timepoint(timepoint):
+            print(f"Labelling timepoint {timepoint}")
+            processed_data = self.processed_data[timepoint]
+            data_idx = find_indices(processed_data)
+            segment_assignments = assign_segments_to_indices(data_idx, self.matched_segments[timepoint])
+
+            shape = processed_data.shape
+            num_segments = max(segment_assignments) + 1
+            labeled_array_color, label_colors = label_data_for_imagej_color(data_idx, segment_assignments, shape, num_segments)
+
+            print(f"Finished labelling timepoint {timepoint}")
+            return timepoint, labeled_array_color, label_colors
+
+        num_timepoints = len(self.processed_data)
+        self.labeled_data = [None] * num_timepoints
+        self.label_colors = [None] * num_timepoints
+
+        print(f"Labeling {num_timepoints} timepoints")
+
+        with ThreadPoolExecutor(max_workers=min(os.cpu_count(), num_timepoints)) as executor:
+            futures = [executor.submit(process_timepoint, timepoint) 
+                    for timepoint in range(num_timepoints)]
+            
+            for future in as_completed(futures):
+                try:
+                    timepoint, labeled_array, colors = future.result()
+                    self.labeled_data[timepoint] = labeled_array
+                    self.label_colors[timepoint] = colors
+                    print(f"Timepoint {timepoint} volume labeled successfully.")
+                except Exception as exc:
+                    print(f"Labeling generated an exception for timepoint {timepoint}: {exc}")
+
+        # Check if all timepoints were labeled
+        missing = [i for i in range(num_timepoints) if self.labeled_data[i] is None]
+        if missing:
+            print(f"Warning: Timepoints {missing} were not labeled successfully")
+        else:
+            print("All timepoints labeled successfully")
+
+        print("Finished label_segmented_volume method")
+
     def run_pipeline(self):
-        print("Starting pipeline")
+        def timer(start_time):
+            return f"{time.time() - start_time:.2f} seconds"
+
+        print("Starting pipeline.")
+        total_start = time.time()
+
+        start = time.time()
         self.load_data()
+        print(f"Data loaded. Shape: {self.raw_data.shape}. Time: {timer(start)}")
+
+        start = time.time()
         self.crop_data()
+        print(f"Data cropped. New shape: {self.raw_data.shape}. Time: {timer(start)}")
+
+        start = time.time()
         self.preprocess()
+        print(f"Data preprocessed. Processed data shape: {[data.shape for data in self.processed_data]}. Time: {timer(start)}")
+
+        start = time.time()
         self.skeletonize()
+        print(f"Data skeletonized. Time: {timer(start)}")
+        print(f"Number of tips per timepoint: {[len(tip) if tip is not None else 0 for tip in self.tips]}")
+        print(f"Number of knots per timepoint: {[len(knot) if knot is not None else 0 for knot in self.knots]}")
+
+        start = time.time()
         self.find_outer_segments()
+        print(f"Outer segments found. Number of outer segments per timepoint: {[len(segments) for segments in self.outer_segments]}. Time: {timer(start)}")
+
+        start = time.time()
         self.match_segments()
+        print(f"Segments matched. Number of matched segments per timepoint: {[len(segments) for segments in self.matched_segments]}. Time: {timer(start)}")
+
+        start = time.time()
         self.get_unmatched_voxels()
-        print("Pipeline completed")
+        print(f"Unmatched voxels identified. Unmatched segment shapes: {[unmatch.shape for unmatch in self.unmatched_segments]}. Time: {timer(start)}")
+
+        start = time.time()
+        self.label_segmented_volume()
+        print(f"Volumes labeled. Number of labeled timepoints: {len(self.labeled_data)}. Time: {timer(start)}")
+
+        print(f"Pipeline complete. Total time: {timer(total_start)}")
 
     # Function to handle saving of all potential outputs from pipeline
-    def save_results(self, output_path, save_numpy=True, save_tiff=False, save_plotly=True):
-        if self.preprocessed_data is None or self.mip_masks is None:
+    def save_results(self, output_path, save_numpy=True, save_tiff=False, save_plotly=True, save_labeled_tiff=True):
+        if self.processed_data is None or self.mip_masks is None:
             raise ValueError("Data not preprocessed. Call preprocess() first.")
         
         # Check is save path exists. If not, create required directories
         if not os.path.exists(output_path):
             os.makedirs(output_path)
 
-        for timepoint in range(len(self.preprocessed_data)):
-            if self.preprocessed_data[timepoint] is not None:
+        for timepoint in range(len(self.processed_data)):
+            if self.processed_data[timepoint] is not None:
                 if save_tiff:
-                    tiff.imwrite(f'{output_path}/thresh_stack_{timepoint}.tif', self.preprocessed_data[timepoint].astype(np.uint8)*255)
+                    tiff.imwrite(f'{output_path}/thresh_stack_{timepoint}.tif', self.processed_data[timepoint].astype(np.uint8)*255)
                 if save_numpy:
-                    np.save(f'{output_path}/pvd_binary_{timepoint}.npy', self.preprocessed_data[timepoint].astype(np.uint8))
+                    np.save(f'{output_path}/pvd_binary_{timepoint}.npy', self.processed_data[timepoint].astype(np.uint8))
             if self.mip_masks[timepoint] is not None:
                 if save_tiff:
                     tiff.imwrite(f'{output_path}/mip_mask_{timepoint}.tif', self.mip_masks[timepoint].astype(np.uint8)*255)
@@ -231,3 +348,10 @@ class PVD:
             self.visualize_skeleton(vis_path)
             self.visualize_outer_segments(vis_path)
             self.visualize_matched_segments(vis_path)
+
+        # Save labelled tiffs
+        if save_labeled_tiff:
+            if self.labeled_data is not None:
+                for timepoint, labeled_array in enumerate(self.labeled_data):
+                    tiff.imwrite(f'{output_path}/labeled_data_color_{timepoint}.tif', labeled_array)
+                print(f"Labeled data saved as TIFF files in {vis_path}")

@@ -196,7 +196,7 @@ def visualize_matched_segments(matched_segments, skeletons, output_path, title):
     seg_coordinates = [extract_coordinates(segments) for segments in matched_segments]
 
     # Set colors
-    base_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'cyan', 'magenta']
+    base_colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'magenta']  # Cyan omitted
     tints = create_tints(base_colors)
     color_lists = [base_colors, tints[0], tints[1], tints[2]]
 
