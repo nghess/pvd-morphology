@@ -4,18 +4,29 @@ from skimage import io
 import tifffile as tiff
 from preprocess import preprocess_data
 from skeletonize import skeletonize_data
+from segment_matching import find_outer_segments, match_segments, get_matched_segments
+from visualize import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+
 class PVD:
-    def __init__(self, tiff_stack_path):
-        self.tiff_stack_path = tiff_stack_path
+    def __init__(self, path, dataset, session, file):
+        self.path = path
+        self.dataset = dataset
+        self.session = session
+        self.file = file
+        self.tiff_stack_path = f"{self.path}/{self.dataset}/{self.session}/{file}"
         self.raw_data = None
         self.preprocessed_data = None
         self.mip_masks = None
         self.mip = None
-        self.skeletonized_data = None
+        self.skeletonized_data = None  # Get rid of this at some point. Wasteful.
+        self.skeleton_idx = None
         self.tips = None
         self.knots = None
+        self.outer_segments = None
+        self.matched_segments = None
+        self.unmatched_segments = None
 
     def load_data(self):
         self.raw_data = io.imread(self.tiff_stack_path)
@@ -81,13 +92,101 @@ class PVD:
             raise ValueError("Data not preprocessed. Call preprocess() first.")
         
         results = skeletonize_data(self.preprocessed_data)
-        self.skeletonized_data, self.tips, self.knots = zip(*results)
+        self.skeletonized_data, self.tips, self.knots, self.skeleton_idx = zip(*results)
         
         print(f"Skeletonized data shape: {[skeleton.shape if skeleton is not None else None for skeleton in self.skeletonized_data]}")
         print(f"Number of tips per timepoint: {[len(tip) if tip is not None else 0 for tip in self.tips]}")
         print(f"Number of knots per timepoint: {[len(knot) if knot is not None else 0 for knot in self.knots]}")
 
-    def save_results(self, output_path, save_npy=True, save_tiff=False):
+    def find_outer_segments(self):
+        if self.skeletonized_data is None or self.tips is None or self.knots is None:
+            raise ValueError("Data not skeletonized. Call skeletonize() first.")
+        
+        self.outer_segments = []
+        for t in range(len(self.skeletonized_data)):
+            segments = find_outer_segments(self.skeletonized_data[t], self.tips[t], self.knots[t])
+            self.outer_segments.append(segments)
+
+    def match_segments(self):
+        if self.outer_segments is None:
+            raise ValueError("Outer segments not found. Call find_outer_segments() first.")
+        
+        matched_results = match_segments(self.outer_segments)
+        self.matched_segments = get_matched_segments(self.outer_segments, matched_results)
+        
+        print(f"Matched {len(self.matched_segments[0])} segments across all timepoints.")
+
+    def set_cells_to_zero(self, arr, segment_coords):
+        def coord_generator():
+            for sublist in segment_coords:
+                for coord in sublist:
+                    yield coord
+
+        coords = np.array(list(coord_generator())).T
+        arr[coords[0], coords[1], coords[2]] = 0
+        
+        return arr
+
+    def get_unmatched_voxels(self):
+        self.unmatched_segments = []
+        for t in range(self.raw_data.shape[0]):
+            self.unmatched_segments.append(self.set_cells_to_zero(self.skeletonized_data[t], self.matched_segments[t]))
+
+        print(f"Grouped unmatched segments across all timepoints.")
+
+    def visualize_skeleton(self, output_path):
+        if self.skeletonized_data is None or self.tips is None or self.knots is None:
+            raise ValueError("Data not skeletonized. Call skeletonize() first.")
+        
+        for t in range(len(self.skeletonized_data)):
+            visualize_skeleton(
+                self.skeletonized_data[t],
+                self.tips[t],
+                self.knots[t],
+                f'{output_path}/skeleton_t{t}.html',
+                f'Skeleton: <b>{self.session}</b></br>Timepoint <b>{t}</b>'
+            )
+        
+        print(f"Skeleton visualizations saved to {output_path}")
+
+    def visualize_outer_segments(self, output_path):
+        if self.outer_segments is None:
+            raise ValueError("Outer segments not found. Call find_outer_segments() first.")
+        
+        for t in range(len(self.outer_segments)):
+            visualize_segments(
+                self.outer_segments[t],
+                self.skeletonized_data[t],
+                f'{output_path}/outer_segments_t{t}.html',
+                f'Outer Segments: <b>{self.session}</b></br>Timepoint <b>{t}</b>'
+            )
+        
+        print(f"Outer segment visualizations saved to {output_path}")
+
+    def visualize_matched_segments(self, output_path):
+        if self.matched_segments is None:
+            raise ValueError("Matched segments not found. Call match_segments() first.")
+        
+        visualize_matched_segments(
+            self.matched_segments,
+            self.unmatched_segments,
+            f'{output_path}/matched_segments.html',
+            f'Matched Segments (4 timepoints): <b>{self.session}</b>'
+        )
+
+    def run_pipeline(self):
+        print("Starting pipeline")
+        self.load_data()
+        self.crop_data()
+        self.preprocess()
+        self.skeletonize()
+        self.find_outer_segments()
+        self.match_segments()
+        self.get_unmatched_voxels()
+        print("Pipeline completed")
+
+    # Function to handle saving of all potential outputs from pipeline
+    def save_results(self, output_path, save_numpy=True, save_tiff=False, save_plotly=True):
         if self.preprocessed_data is None or self.mip_masks is None:
             raise ValueError("Data not preprocessed. Call preprocess() first.")
         
@@ -99,31 +198,36 @@ class PVD:
             if self.preprocessed_data[timepoint] is not None:
                 if save_tiff:
                     tiff.imwrite(f'{output_path}/thresh_stack_{timepoint}.tif', self.preprocessed_data[timepoint].astype(np.uint8)*255)
-                if save_npy:
+                if save_numpy:
                     np.save(f'{output_path}/pvd_binary_{timepoint}.npy', self.preprocessed_data[timepoint].astype(np.uint8))
             if self.mip_masks[timepoint] is not None:
                 if save_tiff:
                     tiff.imwrite(f'{output_path}/mip_mask_{timepoint}.tif', self.mip_masks[timepoint].astype(np.uint8)*255)
-                if save_npy:
+                if save_numpy:
                     np.save(f'{output_path}/mip_mask_{timepoint}.npy', self.mip_masks[timepoint])
 
-        # Change this to pickle. Also perhaps just save the entire PVD object?
+        # Change this to pickle? Also perhaps just save the entire PVD object?
         if self.skeletonized_data is not None:
             for timepoint in range(len(self.skeletonized_data)):
                 if self.skeletonized_data[timepoint] is not None:
-                    if save_npy:
+                    if save_numpy:
                         np.save(f'{output_path}/pvd_skeleton_{timepoint}.npy', self.skeletonized_data[timepoint])
                 if self.tips[timepoint] is not None:
-                    if save_npy:
+                    if save_numpy:
                         np.save(f'{output_path}/pvd_tips_{timepoint}.npy', np.array(self.tips[timepoint]))
                 if self.knots[timepoint] is not None:
-                    if save_npy:
+                    if save_numpy:
                         np.save(f'{output_path}/pvd_knots_{timepoint}.npy', np.array(self.knots[timepoint]))
 
-    def run_pipeline(self):
-        print("Starting pipeline")
-        self.load_data()
-        self.crop_data()
-        self.preprocess()
-        self.skeletonize()
-        print("Pipeline completed")
+        if self.matched_segments is not None:
+            for timepoint in range(len(self.matched_segments)):
+                if save_numpy:
+                    np.save(f'{output_path}/pvd_matched_segments_{timepoint}.npy', self.matched_segments[timepoint])
+
+        # Save plotly visualizations
+        if save_plotly:
+            vis_path = f'{output_path}/visualizations'
+            os.makedirs(vis_path, exist_ok=True)
+            self.visualize_skeleton(vis_path)
+            self.visualize_outer_segments(vis_path)
+            self.visualize_matched_segments(vis_path)

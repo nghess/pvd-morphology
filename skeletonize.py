@@ -82,14 +82,14 @@ def find_tips_and_knots(skeleton):
     knots = remove_close_coordinates(knots, tolerance=1)
     tips = filter_coordinates(tips, knots, tolerance=5)
     
-    return tips, knots
+    return tips, knots, skeleton_idx
 
 def process_timepoint(timepoint, binary_data):
     try:
         print(f"Skeletonizing timepoint {timepoint}")
         skeleton = skeletonize_stack(binary_data)
-        tips, knots = find_tips_and_knots(skeleton)
-        return timepoint, skeleton, tips, knots
+        tips, knots, skeleton_idx = find_tips_and_knots(skeleton)
+        return timepoint, skeleton, tips, knots, skeleton_idx
     except Exception as e:
         print(f"Error skeletonizing timepoint {timepoint}: {str(e)}")
         return timepoint, None, None, None
@@ -103,8 +103,8 @@ def skeletonize_data(binary_data):
         
         for future in as_completed(futures):
             try:
-                timepoint, skeleton, tips, knots = future.result()
-                results[timepoint] = (skeleton, tips, knots)
+                timepoint, skeleton, tips, knots, skeleton_idx = future.result()
+                results[timepoint] = (skeleton, tips, knots, skeleton_idx)
                 if skeleton is not None:
                     print(f"Completed skeletonizing timepoint {timepoint}")
                 else:

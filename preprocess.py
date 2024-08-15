@@ -42,9 +42,6 @@ def threshold_slice(image, threshold=0, cleaned=False, min_size=4):  # Is this b
         image = morphology.remove_small_objects(binary_img, min_size, connectivity=4)
     return image
 
-def threshold_slice_yen(image):
-    return filters.threshold_yen(image)
-
 def process_stack(input_stack, process_func, *args, **kwargs):
     return np.array([process_func(input_stack[z,:,:], *args, **kwargs) for z in range(input_stack.shape[0])])
 
