@@ -244,7 +244,7 @@ class PVD:
             print("All timepoints labeled successfully")
 
         self.num_labels = max(np.max(arr) for arr in self.labeled_data)
-        print(f"Total number of unique labels: {self.num_labels}")
+        print(f"Number of unique labels: {self.num_labels}")
 
         print("Finished label_segmented_volume method")
 
