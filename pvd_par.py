@@ -246,8 +246,6 @@ class PVD:
         self.num_labels = max(np.max(arr) for arr in self.labeled_data)
         print(f"Number of unique labels: {self.num_labels}")
 
-        print("Finished label_segmented_volume method")
-
     def generate_dataframe(self):
         if self.labeled_data is None or self.matched_segments is None:
             raise ValueError("Labeled data or matched segments not available. Make sure to run label_segmented_volume() first.")
