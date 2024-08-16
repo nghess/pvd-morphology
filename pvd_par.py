@@ -1,6 +1,7 @@
 import os
 import time
 import numpy as np
+import pandas as pd
 from skimage import io
 import tifffile as tiff
 from preprocess import preprocess_data
@@ -29,8 +30,10 @@ class PVD:
         self.outer_segments = None
         self.matched_segments = None
         self.unmatched_segments = None
+        self.matched_volumes = None
         self.labeled_data = []
         self.label_colors = []
+        self.segment_dataframe = None
 
     def load_data(self):
         self.raw_data = io.imread(self.tiff_stack_path)
@@ -189,8 +192,6 @@ class PVD:
         if self.processed_data is None or self.matched_segments is None:
             raise ValueError("Processed data or matched segments not available. Make sure to run the pipeline first.")
 
-        print("Starting label_segmented_volume method")
-
         def find_indices(array):
             return np.argwhere(array > 0)
 
@@ -209,33 +210,19 @@ class PVD:
             segment_assignments = [coord_to_segment[tuple(flattened_segments[i])] for i in nearest_indices]
             return segment_assignments
 
-        def label_data_for_imagej_color(indices, segment_assignments, shape, num_segments):
-            labeled_array = np.zeros((*shape, 3), dtype=np.uint8)
-            np.random.seed(0)
-            colors = np.random.randint(0, 255, size=(num_segments, 3), dtype=np.uint8)
-            
-            labeled_array[indices[:, 0], indices[:, 1], indices[:, 2]] = colors[segment_assignments]
-            
-            return labeled_array, colors
-
         def process_timepoint(timepoint):
-            print(f"Labelling timepoint {timepoint}")
             processed_data = self.processed_data[timepoint]
             data_idx = find_indices(processed_data)
             segment_assignments = assign_segments_to_indices(data_idx, self.matched_segments[timepoint])
 
             shape = processed_data.shape
-            num_segments = max(segment_assignments) + 1
-            labeled_array_color, label_colors = label_data_for_imagej_color(data_idx, segment_assignments, shape, num_segments)
+            labeled_array = np.zeros(shape, dtype=np.uint16)
+            labeled_array[data_idx[:, 0], data_idx[:, 1], data_idx[:, 2]] = np.array(segment_assignments) + 1  # +1 to reserve 0 for background
 
-            print(f"Finished labelling timepoint {timepoint}")
-            return timepoint, labeled_array_color, label_colors
+            return timepoint, labeled_array
 
         num_timepoints = len(self.processed_data)
         self.labeled_data = [None] * num_timepoints
-        self.label_colors = [None] * num_timepoints
-
-        print(f"Labeling {num_timepoints} timepoints")
 
         with ThreadPoolExecutor(max_workers=min(os.cpu_count(), num_timepoints)) as executor:
             futures = [executor.submit(process_timepoint, timepoint) 
@@ -243,9 +230,8 @@ class PVD:
             
             for future in as_completed(futures):
                 try:
-                    timepoint, labeled_array, colors = future.result()
+                    timepoint, labeled_array = future.result()
                     self.labeled_data[timepoint] = labeled_array
-                    self.label_colors[timepoint] = colors
                     print(f"Timepoint {timepoint} volume labeled successfully.")
                 except Exception as exc:
                     print(f"Labeling generated an exception for timepoint {timepoint}: {exc}")
@@ -257,8 +243,53 @@ class PVD:
         else:
             print("All timepoints labeled successfully")
 
+        self.num_labels = max(np.max(arr) for arr in self.labeled_data)
+        print(f"Total number of unique labels: {self.num_labels}")
+
         print("Finished label_segmented_volume method")
 
+    def generate_dataframe(self):
+        if self.labeled_data is None or self.matched_segments is None:
+            raise ValueError("Labeled data or matched segments not available. Make sure to run label_segmented_volume() first.")
+
+        print("Generating volume changes DataFrame")
+
+        # Get the number of timepoints and matched segments
+        num_timepoints = len(self.labeled_data)
+        num_segments = len(self.matched_segments[0])  # Assuming all timepoints have the same number of matched segments
+
+        # Create a dictionary to store the cell counts and segment lengths
+        data = {'Timepoint': list(range(num_timepoints))}
+        
+        for i in range(num_segments):
+            data[f'Segment_{i+1}_Count'] = []
+            data[f'Segment_{i+1}_Length'] = []
+
+        # Count cells for each segment and get segment lengths at each timepoint
+        for t in range(num_timepoints):
+            labeled_volume = self.labeled_data[t]
+            unique, counts = np.unique(labeled_volume, return_counts=True)
+            count_dict = dict(zip(unique, counts))
+            
+            for i in range(num_segments):
+                # Voxel count (volume)
+                data[f'Segment_{i+1}_Count'].append(count_dict.get(i+1, 0))
+                
+                # Segment length
+                segment_length = len(self.matched_segments[t][i])
+                data[f'Segment_{i+1}_Length'].append(segment_length)
+
+        # Create the DataFrame
+        df = pd.DataFrame(data)
+
+        # Set 'Timepoint' as the index
+        df.set_index('Timepoint', inplace=True)
+
+        self.segment_dataframe = df
+
+        return df
+
+    # Here we execute the full pipeline and log basic info and processing time
     def run_pipeline(self):
         def timer(start_time):
             return f"{time.time() - start_time:.2f} seconds"
@@ -268,42 +299,46 @@ class PVD:
 
         start = time.time()
         self.load_data()
-        print(f"Data loaded. Shape: {self.raw_data.shape}. Time: {timer(start)}")
+        print(f"Data loaded. Shape: {self.raw_data.shape}: {timer(start)}")
 
         start = time.time()
         self.crop_data()
-        print(f"Data cropped. New shape: {self.raw_data.shape}. Time: {timer(start)}")
+        print(f"Data cropped. Shape: {self.raw_data.shape}: {timer(start)}")
 
         start = time.time()
         self.preprocess()
-        print(f"Data preprocessed. Processed data shape: {[data.shape for data in self.processed_data]}. Time: {timer(start)}")
+        print(f"Preprocessing complete: {timer(start)}")
 
         start = time.time()
         self.skeletonize()
-        print(f"Data skeletonized. Time: {timer(start)}")
+        print(f"Data skeletonized: {timer(start)}")
         print(f"Number of tips per timepoint: {[len(tip) if tip is not None else 0 for tip in self.tips]}")
         print(f"Number of knots per timepoint: {[len(knot) if knot is not None else 0 for knot in self.knots]}")
 
         start = time.time()
         self.find_outer_segments()
-        print(f"Outer segments found. Number of outer segments per timepoint: {[len(segments) for segments in self.outer_segments]}. Time: {timer(start)}")
+        print(f"Outer segments found. Number of outer segments per timepoint: {[len(segments) for segments in self.outer_segments]}: {timer(start)}")
 
         start = time.time()
         self.match_segments()
-        print(f"Segments matched. Number of matched segments per timepoint: {[len(segments) for segments in self.matched_segments]}. Time: {timer(start)}")
+        print(f"Segments matched. Number of matched segments per timepoint: {[len(segments) for segments in self.matched_segments]}: {timer(start)}")
 
         start = time.time()
         self.get_unmatched_voxels()
-        print(f"Unmatched voxels identified. Unmatched segment shapes: {[unmatch.shape for unmatch in self.unmatched_segments]}. Time: {timer(start)}")
+        print(f"Unmatched voxels identified. Unmatched segment shapes: {[unmatch.shape for unmatch in self.unmatched_segments]}: {timer(start)}")
 
         start = time.time()
         self.label_segmented_volume()
-        print(f"Volumes labeled. Number of labeled timepoints: {len(self.labeled_data)}. Time: {timer(start)}")
+        print(f"Volumes labeled: {timer(start)}")
+
+        start = time.time()
+        self.generate_dataframe()
+        print(f"Volume changes DataFrame generated: {timer(start)}")
 
         print(f"Pipeline complete. Total time: {timer(total_start)}")
 
     # Function to handle saving of all potential outputs from pipeline
-    def save_results(self, output_path, save_numpy=True, save_tiff=False, save_plotly=True, save_labeled_tiff=True):
+    def save_results(self, output_path, save_numpy=True, save_tiff=False, save_plotly=True, save_labeled_tiff=False, save_dataframe=True):
         if self.processed_data is None or self.mip_masks is None:
             raise ValueError("Data not preprocessed. Call preprocess() first.")
         
@@ -353,5 +388,12 @@ class PVD:
         if save_labeled_tiff:
             if self.labeled_data is not None:
                 for timepoint, labeled_array in enumerate(self.labeled_data):
-                    tiff.imwrite(f'{output_path}/labeled_data_color_{timepoint}.tif', labeled_array)
-                print(f"Labeled data saved as TIFF files in {vis_path}")
+                    colored_array = color_labeled_volume(labeled_array, self.num_labels)
+                    tiff.imwrite(f'{vis_path}/labeled_data_t{timepoint}.tif', colored_array)
+                print(f"Labeled data saved as color TIFF files in {output_path}")
+
+        # Save volume changes DataFrame
+        if save_dataframe and hasattr(self, 'segment_dataframe'):
+            csv_path = f'{output_path}/segment_change.csv'
+            self.segment_dataframe.to_csv(csv_path)
+            print(f"Volume changes DataFrame saved to {csv_path}")

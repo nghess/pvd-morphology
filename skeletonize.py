@@ -86,7 +86,7 @@ def find_tips_and_knots(skeleton):
 
 def process_timepoint(timepoint, binary_data):
     try:
-        print(f"Skeletonizing timepoint {timepoint}")
+        #print(f"Skeletonizing timepoint {timepoint}")
         skeleton = skeletonize_stack(binary_data)
         tips, knots, skeleton_idx = find_tips_and_knots(skeleton)
         return timepoint, skeleton, tips, knots, skeleton_idx
@@ -105,10 +105,10 @@ def skeletonize_data(binary_data):
             try:
                 timepoint, skeleton, tips, knots, skeleton_idx = future.result()
                 results[timepoint] = (skeleton, tips, knots, skeleton_idx)
-                if skeleton is not None:
-                    print(f"Completed skeletonizing timepoint {timepoint}")
-                else:
-                    print(f"Failed to skeletonize timepoint {timepoint}")
+                # if skeleton is not None:
+                #     print(f"Completed skeletonizing timepoint {timepoint}")
+                # else:
+                #     print(f"Failed to skeletonize timepoint {timepoint}")
             except Exception as exc:
                 print(f'Future for timepoint skeletonization generated an exception: {exc}')
     
