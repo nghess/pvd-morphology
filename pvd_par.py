@@ -125,7 +125,9 @@ class PVD:
                     yield coord
 
         coords = np.array(list(coord_generator())).T
-        arr[coords[0], coords[1], coords[2]] = 0
+
+        if len(coords) > 0:
+            arr[coords[0], coords[1], coords[2]] = 0
         
         return arr
 
@@ -134,7 +136,7 @@ class PVD:
         for t in range(self.processed_data.shape[0]):
             self.unmatched_segments.append(self.set_cells_to_zero(self.skeletonized_data[t], self.matched_segments[t]))
 
-        core_segments = []  # This list is populated with indices of all unmatched segments
+        core_segments = []  # This list is populated with indices of all unmatched ('core') segments
 
         for ii in range(len(self.unmatched_segments)):
             core_segments.append(np.where(self.unmatched_segments[ii] == 1))
@@ -144,9 +146,7 @@ class PVD:
             y = list(core_segments[ii][2])
             z = list(core_segments[ii][0])
 
-            self.matched_segments[ii].append(list(zip(z,x,y)))  # Append core segment to end of matched segments list for given timepoint
-
-        print(f"Grouped unmatched segments across each timepoint.")
+            self.matched_segments[ii].append(list(zip(z,x,y)))
 
     def visualize_skeleton(self, output_path):
         if self.skeletonized_data is None or self.tips is None or self.knots is None:
@@ -232,7 +232,7 @@ class PVD:
                 try:
                     timepoint, labeled_array = future.result()
                     self.labeled_data[timepoint] = labeled_array
-                    print(f"Timepoint {timepoint} volume labeled successfully.")
+                    #print(f"Timepoint {timepoint} volume labeled successfully.")
                 except Exception as exc:
                     print(f"Labeling generated an exception for timepoint {timepoint}: {exc}")
 
@@ -251,8 +251,6 @@ class PVD:
     def generate_dataframe(self):
         if self.labeled_data is None or self.matched_segments is None:
             raise ValueError("Labeled data or matched segments not available. Make sure to run label_segmented_volume() first.")
-
-        print("Generating volume changes DataFrame")
 
         # Get the number of timepoints and matched segments
         num_timepoints = len(self.labeled_data)
@@ -325,11 +323,11 @@ class PVD:
 
         start = time.time()
         self.get_unmatched_voxels()
-        print(f"Unmatched voxels identified. Unmatched segment shapes: {[unmatch.shape for unmatch in self.unmatched_segments]}: {timer(start)}")
+        print(f"Unmatched segments grouped: {timer(start)}")
 
         start = time.time()
         self.label_segmented_volume()
-        print(f"Volumes labeled: {timer(start)}")
+        print(f"Processed data labeled: {timer(start)}")
 
         start = time.time()
         self.generate_dataframe()
