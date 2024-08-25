@@ -118,7 +118,7 @@ def visualize_skeleton(skeleton, tips, knots, output_path, title):
             yaxis_title='Y (pixels)',
             zaxis_title='Z (image index)',
             aspectmode='manual',
-            aspectratio=dict(x=1, y=1, z=.2),
+            aspectratio=dict(x=1, y=1, z=z/1000),  # Scale z axis to aspect ratio similar to ImageJ 3d Viewer
             zaxis=dict(range=[0, skeleton.shape[0]]),
             xaxis=dict(range=[0, skeleton.shape[1]]),
             yaxis=dict(range=[0, skeleton.shape[2]]),
@@ -173,7 +173,7 @@ def visualize_segments(segments, skeleton, output_path, title):
             yaxis_title='Y (pixels)',
             zaxis_title='Z (image index)',
             aspectmode='manual',
-            aspectratio=dict(x=1, y=1, z=.27),
+            aspectratio=dict(x=1, y=1, z=z/1000),
             zaxis=dict(range=[0, skeleton.shape[0]]),
             xaxis=dict(range=[0, skeleton.shape[1]]),
             yaxis=dict(range=[0, skeleton.shape[2]]),
@@ -231,7 +231,7 @@ def visualize_matched_segments(matched_segments, skeletons, output_path, title):
             yaxis_title='Y (pixels)',
             zaxis_title='Z (image index)',
             aspectmode='manual',
-            aspectratio=dict(x=1, y=1, z=.27),
+            aspectratio=dict(x=1, y=1, z=z/1000),
             zaxis=dict(range=[0, skeletons[0].shape[0]]),
             xaxis=dict(range=[0, skeletons[0].shape[1]]),
             yaxis=dict(range=[0, skeletons[0].shape[2]]),
@@ -242,17 +242,8 @@ def visualize_matched_segments(matched_segments, skeletons, output_path, title):
     # Save the plot to an HTML file
     pio.write_html(fig, file=output_path, auto_open=False)
 
+# Function to add colors to labeled tiff
 def color_labeled_volume(labeled_volume, num_labels):
-    """
-    Convert an integer-labeled volume to a color-labeled volume for visualization.
-
-    Args:
-    labeled_volume (np.array): 3D array with integer labels
-    num_labels (int): Total number of unique labels
-
-    Returns:
-    np.array: 4D array (3D volume with RGB channels)
-    """
     np.random.seed(0)  # For consistent colors across runs
     colors = np.random.randint(0, 255, size=(num_labels + 1, 3), dtype=np.uint8)  # +1 for background
     colors[0] = [0, 0, 0]  # Set background color to black

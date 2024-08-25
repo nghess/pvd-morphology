@@ -1,6 +1,15 @@
 import numpy as np
 from scipy.spatial.distance import euclidean
 from typing import List, Tuple, Dict
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import pairwise_distances
+from scipy.stats import pearsonr
+
+def cosine_sim(list1, list2):
+    list1 = np.array(list1).flatten()
+    list2 = np.array(list2).flatten()
+    return cosine_similarity([list1], [list2])[0][0]
+
 
 def find_filter_plane(skeleton):  # Locate the window with highest density of voxels and take center slice as filter plane
     plane_list = []
@@ -67,38 +76,47 @@ def find_outer_segments(skeleton, tips, knots, filter_plane=True, min_length=Tru
     else:
         return outer_segments
 
-def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], dist_threshold: float = 15.0, manual_midpt: int = 15, auto_midpt: bool = False) -> List[Dict]:
+def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], 
+                            dist_threshold: float = 15.0, 
+                            shape_weight: float = 0.4, 
+                            location_weight: float = 0.6) -> List[Dict]:
     def segment_similarity(line1, line2):
-        z1, x1, y1 = line1[-1]  # End of segment
-        z1_, x1_, y1_ = line2[-1]
-        if auto_midpt:
-            z2, x2, y2 = line1[len(line1)//2]  # Sample a point halfway through the segment
-            z2_, x2_, y2_ = line2[len(line2)//2]
-        else:
-            z2, x2, y2 = line1[manual_midpt-1]  # Sample a hardcoded point farther up the segment
-            z2_, x2_, y2_ = line2[manual_midpt-1]
+        # Location similarity
+        start_dist = euclidean(line1[0], line2[0])
+        end_dist = euclidean(line1[-1], line2[-1])
+        location_sim = 1 / (1 + (start_dist + end_dist) / 2)
         
-        dist_start = euclidean((z1, x1, y1), (z1_, x1_, y1_))
-        dist_end = euclidean((z2, x2, y2), (z2_, x2_, y2_))
+        # Shape similarity
+        # Resample segments to have the same number of points
+        n_points = 50
+        line1_resampled = np.array([line1[int(i * (len(line1) - 1) / (n_points - 1))] for i in range(n_points)])
+        line2_resampled = np.array([line2[int(i * (len(line2) - 1) / (n_points - 1))] for i in range(n_points)])
         
-        return dist_start + dist_end
+        # Calculate shape similarity using Pearson correlation of coordinates
+        corr_x = pearsonr(line1_resampled[:, 0], line2_resampled[:, 0])[0]
+        corr_y = pearsonr(line1_resampled[:, 1], line2_resampled[:, 1])[0]
+        corr_z = pearsonr(line1_resampled[:, 2], line2_resampled[:, 2])[0]
+        shape_sim = (corr_x + corr_y + corr_z) / 3
+        
+        # Combine location and shape similarity
+        return location_weight * location_sim + shape_weight * shape_sim
 
     def find_best_match(line, other_lines):
         best_match_index = None
-        best_score = float('inf')
+        best_score = float('-inf')  # Changed to -inf as we're maximizing similarity
         
         for idx, other_line in enumerate(other_lines):
             score = segment_similarity(line, other_line)
-            if score < best_score:
+            if score > best_score:
                 best_score = score
                 best_match_index = idx
         
         return best_match_index, best_score
 
-    def assign_confidence(score, dist_threshold):
-        if score < dist_threshold:
+    def assign_confidence(score):
+        if score > 0.9:
             return 'High'
-        elif score < 2 * dist_threshold:
+        elif score > 0.66:
             return 'Medium'
         else:
             return 'Low'
@@ -111,7 +129,7 @@ def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], dist_t
         
         for t in range(1, len(segments_list)):
             match_index, score = find_best_match(current_line, segments_list[t])
-            confidence = assign_confidence(score, dist_threshold)
+            confidence = assign_confidence(score)
             
             if match_index is not None:
                 match_line = segments_list[t][match_index]
@@ -122,6 +140,7 @@ def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], dist_t
                 f'match{t}': match_line,
                 f'index{t}': match_index,
                 f'confidence{t}': confidence,
+                f'score{t}': score
             })
             
             if match_line is not None:
