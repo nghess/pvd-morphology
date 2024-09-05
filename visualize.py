@@ -1,7 +1,9 @@
 import plotly.graph_objects as go
 import plotly.io as pio
 import numpy as np
+import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+from pvd_par import PVD
 
 def create_tints(base_colors, num_tints=3):
     def lighten_color(color, factor):
@@ -254,3 +256,22 @@ def color_labeled_volume(labeled_volume, num_labels):
         colored_volume[mask] = colors[i]
 
     return colored_volume
+
+# Function to visualize MIP of each timepoint
+def visualize_mips(pvd, save=False, output_dir=''):
+    assert type(pvd) == PVD, "Input must be PVD class."
+    fig, axs = plt.subplots(2, 2, figsize=(12, 12))
+    axs = axs.ravel()  # Flatten the axis array
+
+    for ii in range(4):
+        axs[ii].imshow(pvd.mip_masks[ii].astype(np.uint8)*255)
+        print(np.min(pvd.mip_masks[ii]))
+        axs[ii].set_title(f'Timepoint {ii}')
+        axs[ii].axis('off')
+
+    plt.tight_layout()
+
+    if save:
+        plt.savefig(f"{output_dir}timepoint_mips.png", dpi=300, bbox_inches='tight')
+    
+    plt.show()
