@@ -8,6 +8,7 @@ from preprocess import preprocess_data
 from skeletonize import skeletonize_data
 from segment_matching import find_outer_segments, match_segments, get_matched_segments
 from visualize import *
+from pvd_metrics import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scipy.spatial import KDTree
 
@@ -341,6 +342,13 @@ class PVD:
         # Check is save path exists. If not, create required directories
         if not os.path.exists(output_path):
             os.makedirs(output_path)
+
+        # Save plot comparing MIP of each timepoint
+        visualize_mips(self, display=False, save=True, output_dir=output_path)
+
+        # Save MIP cosine similarity results:
+        cosine_matrix, quality_score = analyze_cosine_similarity(self, output_path, save=True)
+        print(f"\nQuality Score: {quality_score:.4f}")
 
         for timepoint in range(len(self.processed_data)):
             if self.processed_data[timepoint] is not None:

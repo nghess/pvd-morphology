@@ -21,7 +21,7 @@ class OutputCapture:
         return self.buffer.getvalue()
     
 # Function to get files and paths
-def scan_directories(data_directory, min_size_bytes):
+def scan_directories(data_directory, min_size_bytes, filetype='.tif'):
     dataset_list = []
     session_list = []
     file_list = []
@@ -32,7 +32,7 @@ def scan_directories(data_directory, min_size_bytes):
             continue  # Skip this directory
 
         for file in files:
-            if file.endswith('.tif'):
+            if file.endswith(filetype):
                 file_path = os.path.join(root, file)
 
                 # Check file size
