@@ -1,5 +1,7 @@
 import numpy as np
 from skimage import filters, morphology
+from scipy import ndimage
+
 
 def normalize_img(image, dtype=np.uint8, ceiling=255):
     image = image.astype(float)
@@ -56,12 +58,35 @@ def create_mip_mask(input_stack, dilation_radius=5, erosion_radius=0):
 def remove_floating_regions(input_stack, connectivity=26):
     return morphology.remove_small_objects(input_stack > 0, min_size=48000, connectivity=connectivity)
 
+def remove_corner_connected_voxels(binary_array):
+    # Create kernels for face-connected neighbors
+    kernel_face = np.array([
+        [[0, 0, 0],
+         [0, 1, 0],
+         [0, 0, 0]],
+        [[0, 1, 0],
+         [1, 0, 1],
+         [0, 1, 0]],
+        [[0, 0, 0],
+         [0, 1, 0],
+         [0, 0, 0]]
+    ])
+
+    # Count face-connected neighbors
+    face_connected = ndimage.convolve(binary_array.astype(int), kernel_face, mode='constant', cval=0)
+
+    # Keep voxels that have at least TWO face-connected neighbor or are not set
+    return np.logical_and(binary_array, np.logical_or(face_connected > 1, binary_array == 0))
+
 def preprocess_data(input_stack):
     norm_stack = process_stack(input_stack, normalize_img)
     black_stack = process_stack(norm_stack, set_black)
     processed_stack = process_stack(black_stack, sigmoid_adjustment, std_mult=3, alpha=1) # is this necessary? set_black() may do the job
     #mip_mask = create_mip_mask(input_stack)
     #masked_stack = process_stack(processed_stack, mask_slice, mask=mip_mask)
+
     thresh_stack = process_stack(processed_stack, threshold_slice, threshold=32, min_size=128)
+    thresh_stack = remove_corner_connected_voxels(thresh_stack)
+
     final_stack = remove_floating_regions(thresh_stack)
     return final_stack.astype(np.uint8), "mip_mask_placeholder"

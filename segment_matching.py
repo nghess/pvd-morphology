@@ -23,7 +23,7 @@ def filter_outer_segments(outer_segments, filter_value, tolerance=10):  # Check 
     filtered_segments = [segment for segment in outer_segments if filter_value - tolerance <= segment[-1][0] <= filter_value + tolerance]
     return filtered_segments
 
-def find_outer_segments(skeleton, tips, knots, filter_plane=True, min_length=True, target_length=15):
+def find_outer_segments(skeleton, tips, knots, filter_plane=True, min_length=True, target_length=10):
     def check_neighbors(array, x, y, z, mode="count", prev=None):
         count = 0
         neighbors = []
@@ -76,16 +76,23 @@ def find_outer_segments(skeleton, tips, knots, filter_plane=True, min_length=Tru
     else:
         return outer_segments
 
-def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], dist_threshold: float = 15.0, manual_midpt: int = 15, auto_midpt: bool = False) -> List[Dict]:
-    def segment_similarity(line1, line2):
-        z1, x1, y1 = line1[-1]  # End of segment
-        z1_, x1_, y1_ = line2[-1]
+def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], dist_threshold: float = 20.0, manual_midpt: int = 10, auto_midpt: bool = False) -> List[Dict]:
+    def segment_similarity(segment_1, segment_2):
+
+        segment_1_base_z = segment_1[-1][2]  # Extract Z coordinate in order to zero out segment
+        segment_2_base_z = segment_2[-1][2]
+
+        segment_1_zeroed = [(x,y,z-segment_1_base_z) for (x,y,z) in segment_1]
+        segment_2_zeroed = [(x,y,z-segment_2_base_z) for (x,y,z) in segment_2]
+                
+        z1, x1, y1 = segment_1_zeroed[-1]  # Base of segment
+        z1_, x1_, y1_ = segment_2_zeroed[-1]
         if auto_midpt:
-            z2, x2, y2 = line1[len(line1)//2]  # Sample a point halfway through the segment
-            z2_, x2_, y2_ = line2[len(line2)//2]
+            z2, x2, y2 = segment_1[len(segment_1)//2]  # Sample a point halfway through the segment
+            z2_, x2_, y2_ = segment_2[len(segment_2)//2]
         else:
-            z2, x2, y2 = line1[manual_midpt-1]  # Sample a hardcoded point farther up the segment
-            z2_, x2_, y2_ = line2[manual_midpt-1]
+            z2, x2, y2 = segment_1[manual_midpt-1]  # Sample a hardcoded point farther up the segment
+            z2_, x2_, y2_ = segment_2[manual_midpt-1]
         
         dist_start = euclidean((z1, x1, y1), (z1_, x1_, y1_))
         dist_end = euclidean((z2, x2, y2), (z2_, x2_, y2_))
