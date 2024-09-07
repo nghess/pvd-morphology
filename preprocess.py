@@ -36,9 +36,11 @@ def sigmoid_adjustment(image, std_mult=1.5, alpha=0.5):
 def mask_slice(image, mask):
     return image * mask
 
-def threshold_slice(image, threshold=0, cleaned=False, min_size=4):  # Is this being used effectively?
+def threshold_slice(image, threshold=0, cleaned=False, yen_threshold=True, min_size=4):  # Is this being used effectively?
     canvas = np.ones_like(image)
-    image = np.where(image > threshold, canvas, 0)  # Should we try a more specific method?
+    if yen_threshold:
+        threshold = filters.threshold_yen(image)  # Yen's method to get threshold
+    image = np.where(image > threshold, canvas, 0)
     if cleaned:
         binary_img = image > 0
         image = morphology.remove_small_objects(binary_img, min_size, connectivity=4)
@@ -85,7 +87,7 @@ def preprocess_data(input_stack):
     #mip_mask = create_mip_mask(input_stack)
     #masked_stack = process_stack(processed_stack, mask_slice, mask=mip_mask)
 
-    thresh_stack = process_stack(processed_stack, threshold_slice, threshold=32, min_size=128)
+    thresh_stack = process_stack(processed_stack, threshold_slice, threshold=32, yen_threshold=True, min_size=128)
     thresh_stack = remove_corner_connected_voxels(thresh_stack)
 
     final_stack = remove_floating_regions(thresh_stack)
