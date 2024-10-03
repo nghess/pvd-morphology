@@ -19,7 +19,7 @@ def find_filter_plane(skeleton):  # Locate the window with highest density of vo
     primary_plane = plane_list.index(max(plane_list))
     return primary_plane
 
-def filter_outer_segments(outer_segments, filter_value, tolerance=10):  # Check if segment end is within tolerance of filter plane
+def filter_outer_segments(outer_segments, filter_value, tolerance=15):  # Check if segment end is within tolerance of filter plane
     filtered_segments = [segment for segment in outer_segments if filter_value - tolerance <= segment[-1][0] <= filter_value + tolerance]
     return filtered_segments
 
