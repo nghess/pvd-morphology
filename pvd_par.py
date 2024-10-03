@@ -1,5 +1,6 @@
 import os
 import time
+import pickle
 import numpy as np
 import pandas as pd
 from skimage import io
@@ -11,6 +12,8 @@ from visualize import *
 from pvd_metrics import *
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from scipy.spatial import KDTree
+from scipy.interpolate import CubicSpline
+from scipy.integrate import quad
 
 
 class PVD:
@@ -35,6 +38,8 @@ class PVD:
         self.labeled_data = []
         self.label_colors = []
         self.segment_dataframe = None
+        self.length_change_voxels = None
+        self.length_change_spline = None
 
     def load_data(self):
         self.raw_data = io.imread(self.tiff_stack_path)
@@ -119,6 +124,58 @@ class PVD:
         
         print(f"Matched {len(self.matched_segments[0])} segments across all timepoints.")
 
+    def calculate_similarity_matrices(self):
+        def spline_len(points):
+            # Convert list of tuples to numpy array
+            points = np.array(points)
+            
+            # Separate x, y, z coordinates
+            x, y, z = points[:, 0], points[:, 1], points[:, 2]
+            
+            # Calculate the cumulative distance along the points
+            dist = np.cumsum(np.sqrt(np.sum(np.diff(points, axis=0)**2, axis=1)))
+            dist = np.insert(dist, 0, 0)  # Add starting point
+            
+            # Fit a cubic spline for each dimension
+            cs_x = CubicSpline(dist, x)
+            cs_y = CubicSpline(dist, y)
+            cs_z = CubicSpline(dist, z)
+            
+            # Define the curve function
+            def curve(t):
+                return np.array([cs_x(t), cs_y(t), cs_z(t)])
+            
+            # Calculate the derivative of the curve
+            def curve_derivative(t):
+                return np.array([cs_x.derivative()(t), cs_y.derivative()(t), cs_z.derivative()(t)])
+            
+            # Function to calculate the length element
+            def length_element(t):
+                return np.linalg.norm(curve_derivative(t))
+            
+            # Calculate the total length of the curve
+            length, _ = quad(length_element, dist[0], dist[-1])
+            
+            return length  # Can return {curve} too if desired
+        
+        num_segments = len(self.matched_segments[0])
+        num_times = len(self.matched_segments)
+        
+        similarity_mats_voxels = []
+        similarity_mats_spline = []
+        
+        for i in range(num_segments):
+            segments = [self.matched_segments[t][i] for t in range(num_times)]
+            
+            similarity_mat_voxels = np.array([[len(seg1) - len(seg2) for seg2 in segments] for seg1 in segments])
+            similarity_mat_spline = np.array([[spline_len(seg1) - spline_len(seg2) for seg2 in segments] for seg1 in segments])
+            
+            similarity_mats_voxels.append(similarity_mat_voxels)
+            similarity_mats_spline.append(similarity_mat_spline)
+        
+        self.length_change_voxels = similarity_mats_voxels
+        self.length_change_spline = similarity_mats_spline
+    
     def set_cells_to_zero(self, arr, segment_coords):
         def coord_generator():
             for sublist in segment_coords:
@@ -321,6 +378,10 @@ class PVD:
         print(f"Segments matched. Number of matched segments per timepoint: {[len(segments) for segments in self.matched_segments]}: {timer(start)}")
 
         start = time.time()
+        self.calculate_similarity_matrices()
+        print(f"Segment length changes over timepoints logged: {timer(start)}")
+
+        start = time.time()
         self.get_unmatched_voxels()
         print(f"Unmatched segments grouped: {timer(start)}")
 
@@ -376,6 +437,16 @@ class PVD:
                         np.save(f'{output_path}/pvd_knots_{timepoint}.npy', np.array(self.knots[timepoint]))
 
         if self.matched_segments is not None:
+            # Save matrices of length change
+            #np.save(f'{output_path}/length_change_raw.npy', self.segment_matrices)
+            #np.save(f'{output_path}/length_change_pixels.npy', self.seg_delta_spline)
+
+            with open(f'{output_path}/length_change_voxels.pkl', 'wb') as f:
+                pickle.dump(self.length_change_voxels, f)
+
+            with open(f'{output_path}/length_change_spline.pkl', 'wb') as f:
+                pickle.dump(self.length_change_spline, f)
+
             for timepoint in range(len(self.matched_segments)):
                 if save_numpy:
                     np.save(f'{output_path}/pvd_matched_segments_{timepoint}.npy', self.matched_segments[timepoint])

@@ -256,22 +256,23 @@ def color_labeled_volume(labeled_volume, num_labels):
 
     return colored_volume
 
-# Function to visualize MIP of each timepoint
 def visualize_mips(pvd, display=False, save=False, output_dir=''):
     plt.ioff()  # Turn off interactive mode
-    fig, axs = plt.subplots(2, 2, figsize=(12, 12))
-    axs = axs.ravel()  # Flatten the axis array
-
+    fig = plt.figure(figsize=(12, 12))
+    
     for ii in range(4):
-        axs[ii].imshow(pvd.mip[ii].astype(np.uint8)*255)
-        axs[ii].set_title(f'Timepoint {ii}')
-        axs[ii].axis('off')
+        ax = fig.add_subplot(2, 2, ii+1)
+        ax.imshow(pvd.mip[ii].astype(np.uint8)*255)
+        ax.set_title(f'Timepoint {ii}')
+        ax.axis('off')
 
     plt.tight_layout()
 
     if save:
-        plt.savefig(f"{output_dir}timepoint_mips.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{output_dir}timepoint_mips.png", dpi=150, bbox_inches='tight')
     
     if display:
         plt.ion() # Turn on interactive mode
         plt.show()
+    
+    plt.close(fig)

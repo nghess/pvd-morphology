@@ -19,7 +19,19 @@ def find_filter_plane(skeleton):  # Locate the window with highest density of vo
     primary_plane = plane_list.index(max(plane_list))
     return primary_plane
 
+<<<<<<< Updated upstream
 def filter_outer_segments(outer_segments, filter_value, tolerance=15):  # Check if segment end is within tolerance of filter plane
+=======
+# def find_filter_plane(outer_segments):
+#     segment_bases = []
+#     for segment in outer_segments:
+#         segment_bases.append(segment[-1][0])
+#     plane = np.mean(np.asarray(segment_bases))
+#     #print(plane)
+#     return np.mean(np.asarray(segment_bases))
+
+def filter_outer_segments(outer_segments, filter_value, tolerance=15):  # Check if segment base is within tolerance of filter plane
+>>>>>>> Stashed changes
     filtered_segments = [segment for segment in outer_segments if filter_value - tolerance <= segment[-1][0] <= filter_value + tolerance]
     return filtered_segments
 
@@ -79,8 +91,8 @@ def find_outer_segments(skeleton, tips, knots, filter_plane=True, min_length=Tru
 def match_segments(segments_list: List[List[List[Tuple[int, int, int]]]], dist_threshold: float = 20.0, manual_midpt: int = 10, auto_midpt: bool = False) -> List[Dict]:
     def segment_similarity(segment_1, segment_2):
 
-        segment_1_base_z = segment_1[-1][2]  # Extract Z coordinate in order to zero out segment
-        segment_2_base_z = segment_2[-1][2]
+        segment_1_base_z = segment_1[-1][0]  # Extract Z coordinate in order to zero out segment
+        segment_2_base_z = segment_2[-1][0]
 
         segment_1_zeroed = [(x,y,z-segment_1_base_z) for (x,y,z) in segment_1]
         segment_2_zeroed = [(x,y,z-segment_2_base_z) for (x,y,z) in segment_2]
